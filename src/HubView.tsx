@@ -47,7 +47,6 @@ export function HubView({
   function getEffectiveRepoRoot() {
     const stored =
       typeof window !== "undefined" ? localStorage.getItem(APP_REPO_ROOT_KEY) ?? "" : "";
-    // Priority: in-memory setting -> persisted setting -> empty (falls back to backend default).
     return repoRoot.trim() || stored.trim();
   }
 
@@ -66,13 +65,16 @@ export function HubView({
   const [cloneOpen, setCloneOpen] = useState(false);
   const [cloneUrl, setCloneUrl] = useState("");
   const [cloneSessionId, setCloneSessionId] = useState<string | null>(null);
+  const cloneSessionIdRef = useRef<string | null>(null);
+  useEffect(() => {
+    cloneSessionIdRef.current = cloneSessionId;
+  }, [cloneSessionId]);
   const [cloneLog, setCloneLog] = useState<string[]>([]);
   const [cloneResult, setCloneResult] = useState<{ ok: boolean; error?: string } | null>(null);
   const [resolvedDefaultRoot, setResolvedDefaultRoot] = useState("");
   const cloneLogRef = useRef<HTMLPreElement>(null);
   const moreRef = useRef<HTMLDivElement>(null);
   const listRef = useRef<HTMLUListElement>(null);
-  // Avoid repeatedly scanning the same root during incidental re-renders/refreshes.
   const lastScannedRepoRootRef = useRef<string>(getEffectiveRepoRoot());
   const [effectiveColumns, setEffectiveColumns] = useState<number>(1);
   const isZh = locale === "zh-CN";
@@ -229,13 +231,18 @@ export function HubView({
   }, [repos, query, refreshToken]);
 
   useEffect(() => {
-    if (!cloneSessionId) return;
+    if (!cloneOpen) return;
     const unlistens: Promise<() => void>[] = [];
     unlistens.push(
       onCloneProgress((p) => {
-        if (p.sessionId !== cloneSessionId) return;
+        const line = p.line ?? "";
+
+        const sid = cloneSessionIdRef.current;
+        if (!sid && !busyRef.current) return;
+        if (sid && p.sessionId !== sid) return;
+
         setCloneLog((prev) => {
-          const next = [...prev, p.line];
+          const next = [...prev, line];
           return next.length > 200 ? next.slice(-200) : next;
         });
         requestAnimationFrame(() => {
@@ -245,25 +252,20 @@ export function HubView({
     );
     unlistens.push(
       onCloneDone((p) => {
-        if (p.sessionId !== cloneSessionId) return;
+        const sid = cloneSessionIdRef.current;
+        if (sid && p.sessionId !== sid) return;
         setCloneResult({ ok: p.ok, error: p.error ?? undefined });
         setBusy(false);
         if (p.ok) {
           void refresh();
-          setTimeout(() => {
-            setCloneOpen(false);
-            setCloneUrl("");
-            setCloneLog([]);
-            setCloneResult(null);
-            setCloneSessionId(null);
-          }, 1500);
         }
+        setCloneSessionId(null);
       }),
     );
     return () => {
       for (const u of unlistens) void u.then((fn) => fn());
     };
-  }, [cloneSessionId, refresh]);
+  }, [cloneOpen, refresh]);
 
   useEffect(() => {
     const listEl = listRef.current;
@@ -374,7 +376,8 @@ export function HubView({
     setCloneResult(null);
     setBusy(true);
     try {
-      const sid = await hubCloneRepoStream(url, getEffectiveRepoRoot() || null);
+      const effectiveRoot = getEffectiveRepoRoot();
+      const sid = await hubCloneRepoStream(url, effectiveRoot || null);
       setCloneSessionId(sid);
     } catch (e) {
       setError(String(e));

@@ -82,7 +82,8 @@ export async function hubCloneRepo(
   url: string,
   destParent?: string | null,
 ): Promise<RepoRecord> {
-  return invoke("hub_clone_repo", { url, dest_parent: destParent ?? null });
+  // Tauri command arg deserialization expects camelCase for JS payload.
+  return invoke("hub_clone_repo", { url, destParent: destParent ?? null });
 }
 
 export type CloneProgressPayload = { sessionId: string; line: string };
@@ -92,7 +93,7 @@ export async function hubCloneRepoStream(
   url: string,
   destParent?: string | null,
 ): Promise<string> {
-  return invoke("hub_clone_repo_stream", { url, dest_parent: destParent ?? null });
+  return invoke("hub_clone_repo_stream", { url, destParent: destParent ?? null });
 }
 
 export async function hubCancelClone(sessionId: string): Promise<void> {
@@ -312,6 +313,6 @@ export async function importZip(
 ): Promise<RepoRecord[]> {
   return invoke("import_zip", {
     zip_path: zipPath,
-    dest_parent: destParent ?? null,
+    destParent: destParent ?? null,
   });
 }

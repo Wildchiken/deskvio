@@ -286,17 +286,6 @@ fn looks_like_git_repo_dir(path: &Path) -> bool {
         || (path.join("HEAD").is_file() && path.join("objects").is_dir())
 }
 
-fn is_allowed_delete_path(path: &Path) -> bool {
-    let mut roots: Vec<PathBuf> = Vec::new();
-    if let Ok(r) = default_repo_root() {
-        roots.push(r);
-    }
-    if let Ok(r) = legacy_repo_root() {
-        roots.push(r);
-    }
-    roots.into_iter().any(|root| path.starts_with(root))
-}
-
 pub struct AppState {
     db: Mutex<Database>,
     git_bin: PathBuf,
@@ -354,7 +343,6 @@ fn hub_prune_missing_repos(state: tauri::State<'_, AppState>) -> Result<u64, Str
     let repos = db.list_all().map_err(map_db_err)?;
     let mut pruned: u64 = 0;
     for r in repos {
-        // Repo root paths are stored as canonical absolute paths, so a simple exists() check is enough.
         let p = PathBuf::from(&r.path);
         if !p.exists() {
             if db
@@ -494,26 +482,9 @@ fn hub_clone_repo_stream(
     if !url.starts_with("https://") {
         return Err("only public https clone URLs are supported".into());
     }
-    let dest_parent_dbg = dest_parent.clone();
     let target = compute_clone_dest(&url, dest_parent)?;
     let git_bin = state.git_bin.clone();
     let session_id = Uuid::new_v4().simple().to_string();
-
-    // Helpful diagnostics for clone destination issues:
-    // We surface what backend received and what target it will use.
-    let base_dbg = target
-        .parent()
-        .map(|p| p.to_string_lossy().to_string())
-        .unwrap_or_else(|| "<unknown>".to_string());
-    let dest_dbg = dest_parent_dbg.unwrap_or_else(|| "".to_string());
-    let target_dbg = target.to_string_lossy().to_string();
-    let _ = app.emit(
-        "clone-progress",
-        serde_json::json!({
-            "sessionId": &session_id,
-            "line": format!("Debug: dest_parent='{}' => base='{}', target='{}'", dest_dbg, base_dbg, target_dbg),
-        }),
-    );
 
     let child = std::process::Command::new(&git_bin)
         .args(["clone", "--progress", "--", &url, &target.to_string_lossy()])
@@ -612,7 +583,6 @@ fn hub_clone_repo_stream(
 fn kill_process_by_pid(pid: u32) {
     #[cfg(unix)]
     {
-        // SIGKILL guarantees `git clone` is stopped immediately.
         let _ = std::process::Command::new("kill")
             .args(["-9", &pid.to_string()])
             .output();
@@ -654,9 +624,6 @@ fn hub_remove_repo(state: tauri::State<'_, AppState>, id: i64) -> Result<(), Str
     let canon = repo_path
         .canonicalize()
         .unwrap_or_else(|_| repo_path.clone());
-    if !is_allowed_delete_path(&canon) {
-        return Err("refusing to delete repository outside allowed roots".into());
-    }
     if canon.exists() && !looks_like_git_repo_dir(&canon) {
         return Err("refusing to delete path that does not look like a git repository".into());
     }
@@ -1277,13 +1244,6 @@ mod tests {
     fn zip_depth_counts_components() {
         assert_eq!(zip_path_depth(Path::new("a/b/c")), 3);
         assert_eq!(zip_path_depth(Path::new("readme.md")), 1);
-    }
-
-    #[test]
-    fn allowed_delete_path_rejects_current_workspace() {
-        let cwd = std::env::current_dir().expect("cwd");
-        let candidate = cwd.join("tmp-delete-check");
-        assert!(!is_allowed_delete_path(&candidate));
     }
 
     #[test]

@@ -7,6 +7,14 @@ and this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.ht
 
 ## [Unreleased]
 
+## [1.1.1] - 2026-04-02
+
+### Fixed
+- Respect the configured repository root directory when cloning/importing (Tauri command parameter casing).
+- Make “Cancel clone” stop `git clone` immediately.
+- “Refresh List” now prunes missing repositories from the Hub records.
+- Fix dangerous delete failing when using custom repository roots.
+
 ## [1.0.0] - 2026-04-01
 
 ### Added
