@@ -10,6 +10,8 @@ jobs:
   publish-tauri:
     permissions:
       contents: write
+    env:
+      FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
     strategy:
       fail-fast: false
       matrix:
@@ -20,8 +22,6 @@ jobs:
             args: "--target x86_64-apple-darwin"
           - platform: ubuntu-22.04
             args: ""
-          - platform: ubuntu-22.04-arm
-            args: ""
           - platform: windows-latest
             args: ""
 
@@ -31,7 +31,7 @@ jobs:
       - uses: actions/checkout@v4
 
       - name: Install Linux dependencies
-        if: matrix.platform == 'ubuntu-22.04' || matrix.platform == 'ubuntu-22.04-arm'
+        if: matrix.platform == 'ubuntu-22.04'
         run: |
           sudo apt-get update
           sudo apt-get install -y libwebkit2gtk-4.1-dev libappindicator3-dev librsvg2-dev patchelf
@@ -66,11 +66,11 @@ jobs:
 
             **macOS：** 若提示「无法打开」或来自未知开发者：在 **访达** 里对应用 **右键 → 打开** 一次；或在 **系统设置 → 隐私与安全性** 里选择仍要打开。也可在终端对 `.app` 执行：`xattr -cr /path/to/ProjectShelf.app`
             **Windows：** 若出现 SmartScreen「已阻止」：点 **更多信息 → 仍要运行**（具体文案因系统语言略有不同）。
-            **Linux：** 请从本页 Assets 下载对应 `.deb` / `.AppImage`（或发行版支持的格式），按需 `chmod +x` 后运行 AppImage。
+            **Linux：** CI 仅构建 **x86_64**（amd64）。请从本页 Assets 下载对应 `.deb` / `.AppImage`，按需 `chmod +x` 后运行 AppImage。ARM Linux 需自行本地构建。
 
             ---
 
-            **English:** Unsigned community build (no paid code signing). macOS: right-click the app → Open once, or allow in System Settings → Privacy & Security. Windows: More info → Run anyway. Linux: use the `.deb` / `.AppImage` from Assets.
+            **English:** Unsigned community build (no paid code signing). macOS: right-click the app → Open once, or allow in System Settings → Privacy & Security. Windows: More info → Run anyway. Linux CI builds are **x86_64** only; use `.deb` / `.AppImage` from Assets, or build locally on ARM Linux.
 
             ---
 
