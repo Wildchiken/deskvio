@@ -62,17 +62,15 @@ jobs:
           tagName: v__VERSION__
           releaseName: ProjectShelf v__VERSION__
           releaseBody: |
-            **本仓库为免费、未公证的构建**（无 Apple / Windows 付费证书）。安装包可正常使用；若系统提示安全警告，见下方说明。
+            - 中文
+            - 下载文件见下方 Assets。
+            - 本次构建包含 macOS（Apple Silicon、Intel）、Windows x64、Linux x64。
+            - 变更内容见自动生成的 Release Notes。
 
-            **macOS：** 若提示「无法打开」或来自未知开发者：在 **访达** 里对应用 **右键 → 打开** 一次；或在 **系统设置 → 隐私与安全性** 里选择仍要打开。也可在终端对 `.app` 执行：`xattr -cr /path/to/ProjectShelf.app`
-            **Windows：** 若出现 SmartScreen「已阻止」：点 **更多信息 → 仍要运行**（具体文案因系统语言略有不同）。
-            **Linux：** CI 仅构建 **x86_64**（amd64）。请从本页 Assets 下载对应 `.deb` / `.AppImage`，按需 `chmod +x` 后运行 AppImage。ARM Linux 需自行本地构建。
-
-            ---
-
-            **English:** Unsigned community build (no paid code signing). macOS: right-click the app → Open once, or allow in System Settings → Privacy & Security. Windows: More info → Run anyway. Linux CI builds are **x86_64** only; use `.deb` / `.AppImage` from Assets, or build locally on ARM Linux.
-
-            ---
+            - English
+            - Download assets below.
+            - This release includes builds for macOS (Apple Silicon, Intel), Windows x64, and Linux x64.
+            - See the generated release notes for changes in this version.
 
           releaseDraft: false
           prerelease: false
