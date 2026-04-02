@@ -2,9 +2,9 @@
 
 [中文文档](./README.zh-CN.md)
 
-Deskvio is a local-first desktop app for managing personal Git repositories.
+Manage multiple local Git repositories in one clean desktop app.
 
-It gives you a simple way to browse code, inspect commits, review changes, and keep repository-level release backups without signing in, running a server, or depending on terminal workflows.
+Browse code, inspect commits, review changes, and manage repository-level release backups—all locally, without signing in, running a server, or using the terminal.
 
 ## Highlights
 
@@ -13,6 +13,11 @@ It gives you a simple way to browse code, inspect commits, review changes, and k
 - Multi-repository hub for personal projects
 - Built-in code, commit, and change views
 - Repository-level Releases for versioned file backups
+
+## Screenshots
+![Deskvio preview 01](./public/deskvio-preview-01.png)
+
+![Deskvio preview 02](./public/deskvio-preview-02.png)
 
 ## What It Does
 
