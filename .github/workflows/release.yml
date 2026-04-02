@@ -1,0 +1,81 @@
+name: Release
+
+on:
+  workflow_dispatch:
+  push:
+    tags:
+      - "v*"
+
+jobs:
+  publish-tauri:
+    permissions:
+      contents: write
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - platform: macos-latest
+            args: "--target aarch64-apple-darwin"
+          - platform: macos-latest
+            args: "--target x86_64-apple-darwin"
+          - platform: ubuntu-22.04
+            args: ""
+          - platform: ubuntu-22.04-arm
+            args: ""
+          - platform: windows-latest
+            args: ""
+
+    runs-on: ${{ matrix.platform }}
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Linux dependencies
+        if: matrix.platform == 'ubuntu-22.04' || matrix.platform == 'ubuntu-22.04-arm'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libwebkit2gtk-4.1-dev libappindicator3-dev librsvg2-dev patchelf
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: lts/*
+          cache: npm
+
+      - name: Install Rust stable
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.platform == 'macos-latest' && 'aarch64-apple-darwin,x86_64-apple-darwin' || '' }}
+
+      - name: Rust cache
+        uses: swatinem/rust-cache@v2
+        with:
+          workspaces: "./src-tauri -> target"
+
+      - name: Install frontend dependencies
+        run: npm ci
+
+      - uses: tauri-apps/tauri-action@v0
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          tagName: v__VERSION__
+          releaseName: ProjectShelf v__VERSION__
+          releaseBody: |
+            **本仓库为免费、未公证的构建**（无 Apple / Windows 付费证书）。安装包可正常使用；若系统提示安全警告，见下方说明。
+
+            **macOS：** 若提示「无法打开」或来自未知开发者：在 **访达** 里对应用 **右键 → 打开** 一次；或在 **系统设置 → 隐私与安全性** 里选择仍要打开。也可在终端对 `.app` 执行：`xattr -cr /path/to/ProjectShelf.app`
+            **Windows：** 若出现 SmartScreen「已阻止」：点 **更多信息 → 仍要运行**（具体文案因系统语言略有不同）。
+            **Linux：** 请从本页 Assets 下载对应 `.deb` / `.AppImage`（或发行版支持的格式），按需 `chmod +x` 后运行 AppImage。
+
+            ---
+
+            **English:** Unsigned community build (no paid code signing). macOS: right-click the app → Open once, or allow in System Settings → Privacy & Security. Windows: More info → Run anyway. Linux: use the `.deb` / `.AppImage` from Assets.
+
+            ---
+
+          releaseDraft: false
+          prerelease: false
+          includeUpdaterJson: false
+          generateReleaseNotes: true
+          args: ${{ matrix.args }}
