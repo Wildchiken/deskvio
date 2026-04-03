@@ -117,6 +117,20 @@ export async function hubCancelClone(sessionId: string): Promise<CancelCloneResu
   return invoke("hub_cancel_clone", { sessionId });
 }
 
+export async function hubCheckCloneConflict(url: string): Promise<RepoRecord | null> {
+  return invoke("hub_check_clone_conflict", { url });
+}
+
+export type FetchResetResult = {
+  ok: boolean;
+  dirty: boolean;
+  error: string | null;
+};
+
+export async function hubOverwriteFetchReset(id: number): Promise<FetchResetResult> {
+  return invoke("hub_overwrite_fetch_reset", { id });
+}
+
 export function onCloneProgress(
   cb: (payload: CloneProgressPayload) => void,
 ): Promise<UnlistenFn> {

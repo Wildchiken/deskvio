@@ -7,6 +7,15 @@ and this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.ht
 
 ## [Unreleased]
 
+## [1.1.3] - 2026-04-03
+
+### Added
+- When cloning an HTTPS URL, detect an existing Hub repo whose `origin` matches the URL; offer **clone as copy** or **update in place** via `git fetch` and `git reset --hard FETCH_HEAD`. Overwrite is blocked if the working tree is dirty.
+
+### Changed
+- Hub UI polish: clone and conflict dialogs (focus, Escape, backdrop click to dismiss), light motion on cards, search field, star button, and “more” menu; theme-aware conflict scrim.
+- Pin Rust build output under `src-tauri/target` with `src-tauri/.cargo/config.toml` so a misplaced global `CARGO_TARGET_DIR` does not break local or CI builds.
+
 ## [1.1.2] - 2026-04-02
 
 ### Fixed

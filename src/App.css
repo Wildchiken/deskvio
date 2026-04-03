@@ -412,6 +412,10 @@ body {
   margin-bottom: 0.8rem;
 }
 
+.hub-clone-panel-enter {
+  animation: hubPanelRise 200ms ease-out;
+}
+
 .settings-delete-gate-input {
   width: 100%;
   border: 1px solid var(--panel-border);
@@ -528,6 +532,48 @@ html[data-repo-reader="1"] .app-shell .main .screen-panel > .repo-view.repo-view
   }
 }
 
+@keyframes hubPanelRise {
+  from {
+    opacity: 0;
+    transform: translateY(5px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@keyframes cloneScrimIn {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+
+@keyframes cloneDialogIn {
+  from {
+    opacity: 0;
+    transform: translateY(10px) scale(0.98);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+}
+
+@keyframes hubDropdownIn {
+  from {
+    opacity: 0;
+    transform: translateY(-5px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
 .hub-toolbar {
   display: flex;
   flex-wrap: wrap;
@@ -616,6 +662,8 @@ html[data-repo-reader="1"] .app-shell .main .screen-panel > .repo-view.repo-view
   display: flex;
   flex-direction: column;
   gap: 0.15rem;
+  transform-origin: top right;
+  animation: hubDropdownIn 150ms ease-out;
 }
 
 .hub-dropdown button {
@@ -646,6 +694,16 @@ html[data-repo-reader="1"] .app-shell .main .screen-panel > .repo-view.repo-view
   background: var(--input-bg);
   color: var(--app-fg);
   font: inherit;
+  transition: border-color 160ms ease, box-shadow 160ms ease;
+}
+
+.search-input:hover:not(:disabled) {
+  border-color: color-mix(in srgb, var(--shell-accent) 22%, var(--panel-border));
+}
+
+.search-input:focus-visible {
+  border-color: color-mix(in srgb, var(--shell-accent) 38%, var(--panel-border));
+  box-shadow: 0 0 0 3px var(--focus-ring);
 }
 
 button {
@@ -753,6 +811,7 @@ button.danger {
 }
 
 .repo-card:hover {
+  transform: translateY(-2px);
   box-shadow: var(--card-shadow-hover);
   border-color: color-mix(in srgb, var(--shell-accent) 24%, var(--panel-border));
 }
@@ -783,6 +842,16 @@ button.danger {
   background: transparent;
   padding: 0.15rem 0.35rem;
   font-size: 1.1rem;
+  border-radius: 6px;
+  transition: transform 140ms ease, background-color 140ms ease;
+}
+
+.star-btn:hover:not(:disabled) {
+  background: color-mix(in srgb, var(--control-hover-bg) 65%, transparent);
+}
+
+.star-btn:active:not(:disabled) {
+  transform: scale(0.92);
 }
 
 .repo-title {
@@ -3413,6 +3482,77 @@ html[data-theme="light"] .repo-file-name-btn.active {
   font-size: 0.82rem;
   opacity: 0.78;
   line-height: 1.4;
+}
+
+.clone-conflict-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 500;
+  background: rgba(15, 23, 42, 0.42);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 1rem;
+  animation: cloneScrimIn 200ms ease-out forwards;
+}
+
+html[data-theme="dark"] .clone-conflict-overlay {
+  background: rgba(0, 0, 0, 0.58);
+}
+
+.clone-conflict-panel {
+  background: var(--panel-bg);
+  border: 1px solid var(--panel-border);
+  border-radius: 10px;
+  padding: 1.5rem 1.75rem;
+  width: min(480px, 100%);
+  box-shadow: var(--dropdown-shadow);
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+  animation: cloneDialogIn 220ms cubic-bezier(0.2, 0.85, 0.25, 1) forwards;
+}
+
+.clone-conflict-title {
+  margin: 0;
+  font-size: 1rem;
+  font-weight: 600;
+  color: var(--app-fg);
+}
+
+.clone-conflict-desc {
+  margin: 0;
+  font-size: 0.88rem;
+  color: var(--app-muted);
+  line-height: 1.5;
+}
+
+.clone-conflict-repo-name {
+  font-weight: 600;
+  font-size: 0.95rem;
+  color: var(--app-fg);
+}
+
+.clone-conflict-repo-path {
+  display: block;
+  font-size: 0.78rem;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  color: var(--app-muted);
+  background: var(--code-bg);
+  border: 1px solid var(--panel-border);
+  border-radius: 5px;
+  padding: 0.4rem 0.65rem;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.clone-conflict-actions {
+  display: flex;
+  gap: 0.5rem;
+  justify-content: flex-end;
+  flex-wrap: wrap;
+  margin-top: 0.25rem;
 }
 
 /* ── clone log ── */

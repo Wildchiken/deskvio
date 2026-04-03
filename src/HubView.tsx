@@ -11,8 +11,10 @@ import type { RepoRecord } from "./api";
 import {
   hubAddRepo,
   hubCancelClone,
+  hubCheckCloneConflict,
   hubCloneRepoStream,
   hubListRepos,
+  hubOverwriteFetchReset,
   hubPruneMissingRepos,
   hubScanDirectory,
   hubSearch,
@@ -78,6 +80,11 @@ export function HubView({
   const [cloneLog, setCloneLog] = useState<string[]>([]);
   const [cloneResult, setCloneResult] = useState<{ ok: boolean; error?: string } | null>(null);
   const cloneLogRef = useRef<HTMLPreElement>(null);
+  const cloneUrlInputRef = useRef<HTMLInputElement>(null);
+  const [conflictRepo, setConflictRepo] = useState<RepoRecord | null>(null);
+  const [conflictPendingDestParent, setConflictPendingDestParent] = useState<string>("");
+  const [overwriteBusy, setOverwriteBusy] = useState(false);
+  const [overwriteResult, setOverwriteResult] = useState<{ ok: boolean; dirty?: boolean; error?: string } | null>(null);
   const moreRef = useRef<HTMLDivElement>(null);
   const listRef = useRef<HTMLUListElement>(null);
   const lastScannedRepoRootRef = useRef<string>(getEffectiveRepoRoot());
@@ -158,6 +165,36 @@ export function HubView({
     document.addEventListener("mousedown", close);
     return () => document.removeEventListener("mousedown", close);
   }, [moreOpen]);
+
+  const closeClonePanel = useCallback(() => {
+    setCloneOpen(false);
+    setCloneUrl("");
+    setCloneLog([]);
+    setCloneResult(null);
+    cloneCancelRequestedRef.current = false;
+    cloneSessionIdRef.current = null;
+    setCloneSessionId(null);
+  }, []);
+
+  const dismissConflict = useCallback(() => {
+    setConflictRepo(null);
+    setConflictPendingDestParent("");
+    setOverwriteResult(null);
+  }, []);
+
+  useEffect(() => {
+    if (!cloneOpen || busy || conflictRepo) return;
+    const id = requestAnimationFrame(() => cloneUrlInputRef.current?.focus());
+    return () => cancelAnimationFrame(id);
+  }, [cloneOpen, busy, conflictRepo]);
+
+  useEffect(() => {
+    if (!conflictRepo || overwriteBusy) return;
+    const t = window.setTimeout(() => {
+      document.getElementById("clone-conflict-cancel")?.focus();
+    }, 0);
+    return () => clearTimeout(t);
+  }, [conflictRepo, overwriteBusy]);
 
   const refresh = useCallback(async () => {
     setError(null);
@@ -389,27 +426,10 @@ export function HubView({
     }
   }
 
-  async function submitCloneRepo() {
-    const url = cloneUrl.trim();
-    if (!url) return;
-    setError(null);
-    setCloneLog([]);
-    setCloneResult(null);
+  async function startCloneStream(url: string, destParent: string) {
     cloneCancelRequestedRef.current = false;
     setBusy(true);
     try {
-      let destParent = getEffectiveRepoRoot().trim();
-      if (!destParent) {
-        const dir = await open({
-          directory: true,
-          multiple: false,
-        });
-        if (dir === null || Array.isArray(dir)) {
-          setBusy(false);
-          return;
-        }
-        destParent = dir.trim();
-      }
       const sid = await hubCloneRepoStream(url, destParent);
       if (cloneCancelRequestedRef.current) {
         await hubCancelClone(sid).catch(() => {});
@@ -425,7 +445,63 @@ export function HubView({
     }
   }
 
-  async function cancelClone() {
+  async function submitCloneRepo() {
+    const url = cloneUrl.trim();
+    if (!url) return;
+    setError(null);
+    setCloneLog([]);
+    setCloneResult(null);
+
+    let destParent = getEffectiveRepoRoot().trim();
+    if (!destParent) {
+      const dir = await open({ directory: true, multiple: false });
+      if (dir === null || Array.isArray(dir)) return;
+      destParent = dir.trim();
+    }
+
+    try {
+      const conflict = await hubCheckCloneConflict(url);
+      if (conflict) {
+        setConflictRepo(conflict);
+        setConflictPendingDestParent(destParent);
+        setOverwriteResult(null);
+        return;
+      }
+    } catch {}
+
+    await startCloneStream(url, destParent);
+  }
+
+  async function handleConflictCopy() {
+    const url = cloneUrl.trim();
+    setConflictRepo(null);
+    setCloneLog([]);
+    setCloneResult(null);
+    await startCloneStream(url, conflictPendingDestParent);
+  }
+
+  async function handleConflictOverwrite() {
+    if (!conflictRepo) return;
+    setOverwriteBusy(true);
+    setOverwriteResult(null);
+    try {
+      const result = await hubOverwriteFetchReset(conflictRepo.id);
+      setOverwriteResult({
+        ok: result.ok,
+        dirty: result.dirty,
+        error: result.error ?? undefined,
+      });
+      if (result.ok) {
+        await refresh();
+      }
+    } catch (e) {
+      setOverwriteResult({ ok: false, error: String(e) });
+    } finally {
+      setOverwriteBusy(false);
+    }
+  }
+
+  const cancelClone = useCallback(async () => {
     cloneCancelRequestedRef.current = true;
     const sid = cloneSessionIdRef.current;
     cloneSessionIdRef.current = null;
@@ -457,7 +533,34 @@ export function HubView({
         noticeTimeoutRef.current = setTimeout(() => setNotice(null), 8000);
       }
     }
-  }
+  }, [isZh]);
+
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key !== "Escape") return;
+      if (conflictRepo) {
+        if (!overwriteBusy) dismissConflict();
+        return;
+      }
+      if (cloneOpen) {
+        if (busy) void cancelClone();
+        else closeClonePanel();
+        return;
+      }
+      if (moreOpen) setMoreOpen(false);
+    };
+    document.addEventListener("keydown", onKey);
+    return () => document.removeEventListener("keydown", onKey);
+  }, [
+    conflictRepo,
+    overwriteBusy,
+    cloneOpen,
+    busy,
+    moreOpen,
+    closeClonePanel,
+    dismissConflict,
+    cancelClone,
+  ]);
 
   async function toggleFavorite(r: RepoRecord) {
     try {
@@ -600,7 +703,7 @@ export function HubView({
       {notice && !error && <div className="info-banner">{notice}</div>}
       {cloneOpen && (
         <section
-          className="settings-confirm-panel hub-clone-panel"
+          className="settings-confirm-panel hub-clone-panel hub-clone-panel-enter"
           role="dialog"
           aria-modal="true"
           aria-live="polite"
@@ -611,6 +714,7 @@ export function HubView({
             {isZh ? "仓库 URL" : "Repository URL"}
           </label>
           <input
+            ref={cloneUrlInputRef}
             id="hub-clone-url-input"
             type="url"
             className="settings-delete-gate-input"
@@ -642,19 +746,7 @@ export function HubView({
                 {isZh ? "取消克隆" : "Cancel clone"}
               </button>
             ) : (
-              <button
-                type="button"
-                className="btn-secondary"
-                onClick={() => {
-                  setCloneOpen(false);
-                  setCloneUrl("");
-                  setCloneLog([]);
-                  setCloneResult(null);
-                  cloneCancelRequestedRef.current = false;
-                  cloneSessionIdRef.current = null;
-                  setCloneSessionId(null);
-                }}
-              >
+              <button type="button" className="btn-secondary" onClick={closeClonePanel}>
                 {isZh ? "关闭" : "Close"}
               </button>
             )}
@@ -668,6 +760,71 @@ export function HubView({
             </button>
           </div>
         </section>
+      )}
+      {conflictRepo && (
+        <div
+          className="clone-conflict-overlay"
+          role="dialog"
+          aria-modal="true"
+          aria-labelledby="clone-conflict-heading"
+          onClick={(e) => {
+            if (e.target === e.currentTarget && !overwriteBusy) dismissConflict();
+          }}
+        >
+          <section className="clone-conflict-panel">
+            <h4 id="clone-conflict-heading" className="clone-conflict-title">
+              {isZh ? "相同远程已存在" : "Remote already cloned"}
+            </h4>
+            <p className="clone-conflict-desc">
+              {isZh ? "对应本地路径：" : "Local path:"}
+            </p>
+            <div className="clone-conflict-repo-name">
+              {conflictRepo.displayName ??
+                conflictRepo.path.split(/[/\\]/).filter(Boolean).pop()}
+            </div>
+            <code className="clone-conflict-repo-path">{conflictRepo.path}</code>
+            {overwriteResult && (
+              <div className={overwriteResult.ok ? "info-banner" : "error-banner"}>
+                {overwriteResult.ok
+                  ? isZh ? "已更新" : "Updated"
+                  : overwriteResult.dirty
+                    ? isZh
+                      ? "有未提交改动，无法覆盖。"
+                      : "Uncommitted changes; cannot update."
+                    : overwriteResult.error ?? (isZh ? "失败" : "Failed")}
+              </div>
+            )}
+            <div className="clone-conflict-actions">
+              <button
+                type="button"
+                id="clone-conflict-cancel"
+                className="btn-secondary"
+                onClick={dismissConflict}
+                disabled={overwriteBusy}
+              >
+                {isZh ? "取消" : "Cancel"}
+              </button>
+              <button
+                type="button"
+                className="btn-secondary"
+                onClick={() => void handleConflictCopy()}
+                disabled={overwriteBusy}
+              >
+                {isZh ? "作为副本克隆" : "Clone as copy"}
+              </button>
+              <button
+                type="button"
+                className="btn-primary"
+                onClick={() => void handleConflictOverwrite()}
+                disabled={overwriteBusy || overwriteResult?.ok === true}
+              >
+                {overwriteBusy
+                  ? isZh ? "更新中…" : "Updating..."
+                  : isZh ? "覆盖更新" : "Update existing"}
+              </button>
+            </div>
+          </section>
+        </div>
       )}
       <ul className="repo-list" ref={listRef}>
         {displayedRepos.map((r) => (

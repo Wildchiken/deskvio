@@ -896,6 +896,118 @@ fn hub_cancel_clone(
     })
 }
 
+fn normalize_clone_url(url: &str) -> String {
+    url.trim()
+        .trim_end_matches('/')
+        .trim_end_matches(".git")
+        .to_ascii_lowercase()
+}
+
+#[tauri::command]
+fn hub_check_clone_conflict(
+    state: tauri::State<'_, AppState>,
+    url: String,
+) -> Result<Option<RepoRecord>, String> {
+    let norm_input = normalize_clone_url(url.trim());
+    let db = state.db.lock().map_err(|e| e.to_string())?;
+    let repos = db.list_all().map_err(map_db_err)?;
+    drop(db);
+    for repo in repos {
+        if !PathBuf::from(&repo.path).exists() {
+            continue;
+        }
+        let Ok(ctx) = load_ctx(&state.git_bin, &repo.path) else {
+            continue;
+        };
+        let Ok(remotes) = list_remotes(&state.git_bin, &ctx) else {
+            continue;
+        };
+        for remote in &remotes {
+            if remote.name == "origin" {
+                if normalize_clone_url(&remote.fetch_url) == norm_input {
+                    return Ok(Some(repo));
+                }
+            }
+        }
+    }
+    Ok(None)
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct FetchResetResult {
+    ok: bool,
+    dirty: bool,
+    error: Option<String>,
+}
+
+#[tauri::command]
+fn hub_overwrite_fetch_reset(
+    state: tauri::State<'_, AppState>,
+    id: i64,
+) -> Result<FetchResetResult, String> {
+    let db = state.db.lock().map_err(|e| e.to_string())?;
+    let repo = db
+        .get(id)
+        .map_err(map_db_err)?
+        .ok_or_else(|| "repository not found".to_string())?;
+    drop(db);
+
+    let path_str = repo.path.clone();
+
+    let status_out = std::process::Command::new(&state.git_bin)
+        .args(["-C", &path_str, "status", "--porcelain"])
+        .output()
+        .map_err(|e| e.to_string())?;
+
+    if !status_out.status.success() {
+        let err = String::from_utf8_lossy(&status_out.stderr).trim().to_string();
+        return Ok(FetchResetResult { ok: false, dirty: false, error: Some(err) });
+    }
+
+    let status_text = String::from_utf8_lossy(&status_out.stdout);
+    if !status_text.trim().is_empty() {
+        return Ok(FetchResetResult { ok: false, dirty: true, error: None });
+    }
+
+    let fetch_out = std::process::Command::new(&state.git_bin)
+        .args(["-C", &path_str, "fetch", "origin"])
+        .output()
+        .map_err(|e| e.to_string())?;
+
+    if !fetch_out.status.success() {
+        let err = String::from_utf8_lossy(&fetch_out.stderr).trim().to_string();
+        return Ok(FetchResetResult {
+            ok: false,
+            dirty: false,
+            error: Some(format!("fetch failed: {}", err)),
+        });
+    }
+
+    let reset_out = std::process::Command::new(&state.git_bin)
+        .args(["-C", &path_str, "reset", "--hard", "FETCH_HEAD"])
+        .output()
+        .map_err(|e| e.to_string())?;
+
+    if !reset_out.status.success() {
+        let err = String::from_utf8_lossy(&reset_out.stderr).trim().to_string();
+        return Ok(FetchResetResult {
+            ok: false,
+            dirty: false,
+            error: Some(format!("reset failed: {}", err)),
+        });
+    }
+
+    if let Ok(ctx) = load_ctx(&state.git_bin, &path_str) {
+        let new_head = head_sha(&state.git_bin, &ctx).ok();
+        if let Ok(db) = state.db.lock() {
+            let _ = db.insert_repo(&path_str, repo.display_name, repo.is_bare, new_head);
+        }
+    }
+
+    Ok(FetchResetResult { ok: true, dirty: false, error: None })
+}
+
 #[tauri::command]
 fn hub_remove_repo(state: tauri::State<'_, AppState>, id: i64) -> Result<(), String> {
     let db = state.db.lock().map_err(|e| e.to_string())?;
@@ -1747,6 +1859,8 @@ pub fn run() {
             hub_clone_repo,
             hub_clone_repo_stream,
             hub_cancel_clone,
+            hub_check_clone_conflict,
+            hub_overwrite_fetch_reset,
             hub_remove_repo,
             hub_unlink_repo,
             hub_scan_directory,
