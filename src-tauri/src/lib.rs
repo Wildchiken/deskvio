@@ -1165,112 +1165,125 @@ struct HubPullBatchSummary {
 }
 
 #[tauri::command]
-fn hub_overwrite_fetch_reset(
+async fn hub_overwrite_fetch_reset(
+    app: tauri::AppHandle,
     state: tauri::State<'_, AppState>,
     id: i64,
 ) -> Result<FetchResetResult, String> {
-    let db = state.db.lock().map_err(|e| e.to_string())?;
-    let repo = db
-        .get(id)
-        .map_err(map_db_err)?
-        .ok_or_else(|| "repository not found".to_string())?;
-    drop(db);
+    let (repo, git_bin) = {
+        let db = state.db.lock().map_err(|e| e.to_string())?;
+        let repo = db
+            .get(id)
+            .map_err(map_db_err)?
+            .ok_or_else(|| "repository not found".to_string())?;
+        (repo, state.git_bin.clone())
+    };
 
-    let path_str = repo.path.clone();
+    tauri::async_runtime::spawn_blocking(move || {
+        let path_str = repo.path.clone();
 
-    let status_out = std::process::Command::new(&state.git_bin)
-        .args(["-C", &path_str, "status", "--porcelain"])
-        .output()
-        .map_err(|e| e.to_string())?;
+        let status_out = std::process::Command::new(&git_bin)
+            .args(["-C", &path_str, "status", "--porcelain"])
+            .output()
+            .map_err(|e| e.to_string())?;
 
-    if !status_out.status.success() {
-        let err = String::from_utf8_lossy(&status_out.stderr).trim().to_string();
-        return Ok(FetchResetResult { ok: false, dirty: false, stashed: false, error: Some(err) });
-    }
-
-    let status_text = String::from_utf8_lossy(&status_out.stdout);
-    if !status_text.trim().is_empty() {
-        let mut has_tracked_uncommitted = false;
-        for line in status_text.lines() {
-            let t = line.trim_start();
-            if t.is_empty() {
-                continue;
-            }
-            if t.starts_with("??") {
-                continue;
-            }
-            if t.starts_with("!!") {
-                continue;
-            }
-            has_tracked_uncommitted = true;
-            break;
+        if !status_out.status.success() {
+            let err = String::from_utf8_lossy(&status_out.stderr).trim().to_string();
+            return Ok(FetchResetResult { ok: false, dirty: false, stashed: false, error: Some(err) });
         }
-        if has_tracked_uncommitted {
+
+        let status_text = String::from_utf8_lossy(&status_out.stdout);
+        if !status_text.trim().is_empty() {
+            let mut has_tracked_uncommitted = false;
+            for line in status_text.lines() {
+                let t = line.trim_start();
+                if t.is_empty() {
+                    continue;
+                }
+                if t.starts_with("??") {
+                    continue;
+                }
+                if t.starts_with("!!") {
+                    continue;
+                }
+                has_tracked_uncommitted = true;
+                break;
+            }
+            if has_tracked_uncommitted {
+                return Ok(FetchResetResult {
+                    ok: false,
+                    dirty: true,
+                    stashed: false,
+                    error: None,
+                });
+            }
+        }
+
+        let fetch_out = std::process::Command::new(&git_bin)
+            .args(["-C", &path_str, "fetch", "origin"])
+            .output()
+            .map_err(|e| e.to_string())?;
+
+        if !fetch_out.status.success() {
+            let err = String::from_utf8_lossy(&fetch_out.stderr).trim().to_string();
             return Ok(FetchResetResult {
                 ok: false,
-                dirty: true,
+                dirty: false,
                 stashed: false,
-                error: None,
+                error: Some(format!("fetch failed: {}", err)),
             });
         }
-    }
 
-    let fetch_out = std::process::Command::new(&state.git_bin)
-        .args(["-C", &path_str, "fetch", "origin"])
-        .output()
-        .map_err(|e| e.to_string())?;
+        let reset_out = std::process::Command::new(&git_bin)
+            .args(["-C", &path_str, "reset", "--hard", "FETCH_HEAD"])
+            .output()
+            .map_err(|e| e.to_string())?;
 
-    if !fetch_out.status.success() {
-        let err = String::from_utf8_lossy(&fetch_out.stderr).trim().to_string();
-        return Ok(FetchResetResult {
-            ok: false,
-            dirty: false,
-            stashed: false,
-            error: Some(format!("fetch failed: {}", err)),
-        });
-    }
-
-    let reset_out = std::process::Command::new(&state.git_bin)
-        .args(["-C", &path_str, "reset", "--hard", "FETCH_HEAD"])
-        .output()
-        .map_err(|e| e.to_string())?;
-
-    if !reset_out.status.success() {
-        let err = String::from_utf8_lossy(&reset_out.stderr).trim().to_string();
-        return Ok(FetchResetResult {
-            ok: false,
-            dirty: false,
-            stashed: false,
-            error: Some(format!("reset failed: {}", err)),
-        });
-    }
-
-    if let Ok(ctx) = load_ctx(&state.git_bin, &path_str) {
-        let new_head = head_sha(&state.git_bin, &ctx).ok();
-        if let Ok(db) = state.db.lock() {
-            let _ = db.insert_repo(&path_str, repo.display_name, repo.is_bare, new_head);
+        if !reset_out.status.success() {
+            let err = String::from_utf8_lossy(&reset_out.stderr).trim().to_string();
+            return Ok(FetchResetResult {
+                ok: false,
+                dirty: false,
+                stashed: false,
+                error: Some(format!("reset failed: {}", err)),
+            });
         }
-    }
 
-    Ok(FetchResetResult { ok: true, dirty: false, stashed: false, error: None })
+        if let Ok(ctx) = load_ctx(&git_bin, &path_str) {
+            let new_head = head_sha(&git_bin, &ctx).ok();
+            let st = app.state::<AppState>();
+            if let Ok(db) = st.db.lock() {
+                let _ = db.insert_repo(&path_str, repo.display_name, repo.is_bare, new_head);
+            };
+        }
+
+        Ok(FetchResetResult { ok: true, dirty: false, stashed: false, error: None })
+    })
+    .await
+    .map_err(|e| e.to_string())?
 }
 
 #[tauri::command]
-fn hub_overwrite_fetch_reset_auto(
+async fn hub_overwrite_fetch_reset_auto(
+    app: tauri::AppHandle,
     state: tauri::State<'_, AppState>,
     id: i64,
 ) -> Result<FetchResetResult, String> {
-    let db = state.db.lock().map_err(|e| e.to_string())?;
-    let repo = db
-        .get(id)
-        .map_err(map_db_err)?
-        .ok_or_else(|| "repository not found".to_string())?;
-    drop(db);
-    Ok(hub_pull_from_origin_auto_inner(
-        &state.git_bin,
-        &state.db,
-        &repo,
-    ))
+    let (repo, git_bin) = {
+        let db = state.db.lock().map_err(|e| e.to_string())?;
+        let repo = db
+            .get(id)
+            .map_err(map_db_err)?
+            .ok_or_else(|| "repository not found".to_string())?;
+        (repo, state.git_bin.clone())
+    };
+
+    tauri::async_runtime::spawn_blocking(move || {
+        let st = app.state::<AppState>();
+        hub_pull_from_origin_auto_inner(&git_bin, &st.db, &repo)
+    })
+    .await
+    .map_err(|e| e.to_string())
 }
 
 fn emit_hub_pull_progress(app: &tauri::AppHandle, payload: serde_json::Value) {
@@ -1278,118 +1291,126 @@ fn emit_hub_pull_progress(app: &tauri::AppHandle, payload: serde_json::Value) {
 }
 
 #[tauri::command]
-fn hub_pull_from_remote_auto_many(
+async fn hub_pull_from_remote_auto_many(
     app: tauri::AppHandle,
     state: tauri::State<'_, AppState>,
     ids: Vec<i64>,
 ) -> Result<HubPullBatchSummary, String> {
-    let total = ids.len();
-    let mut succeeded = 0usize;
-    let mut failed = 0usize;
-    let mut skipped_missing = 0usize;
-    let mut failures: Vec<HubPullFailure> = Vec::new();
+    let git_bin = state.git_bin.clone();
+    drop(state);
 
-    emit_hub_pull_progress(
-        &app,
-        serde_json::json!({
-            "phase": "start",
-            "total": total,
-        }),
-    );
+    tauri::async_runtime::spawn_blocking(move || {
+        let total = ids.len();
+        let mut succeeded = 0usize;
+        let mut failed = 0usize;
+        let mut skipped_missing = 0usize;
+        let mut failures: Vec<HubPullFailure> = Vec::new();
+        let st = app.state::<AppState>();
 
-    for (i, id) in ids.iter().enumerate() {
-        let index = i + 1;
-        let repo = {
-            let db = state.db.lock().map_err(|e| e.to_string())?;
-            db.get(*id).map_err(map_db_err)?
-        };
-        let Some(repo) = repo else {
-            failed += 1;
-            failures.push(HubPullFailure {
-                id: *id,
-                display_hint: format!("id {}", id),
-                error: "repository not found".to_string(),
-            });
-            emit_hub_pull_progress(
-                &app,
-                serde_json::json!({
-                    "phase": "item",
-                    "index": index,
-                    "total": total,
-                    "id": id,
-                    "displayHint": format!("id {}", id),
-                    "status": "failed",
-                    "error": "repository not found",
-                }),
-            );
-            continue;
-        };
-        let hint = repo_display_hint(&repo);
-        if !PathBuf::from(&repo.path).exists() {
-            skipped_missing += 1;
-            emit_hub_pull_progress(
-                &app,
-                serde_json::json!({
-                    "phase": "item",
-                    "index": index,
-                    "total": total,
-                    "id": repo.id,
-                    "displayHint": hint,
-                    "status": "skipped",
-                    "error": serde_json::Value::Null,
-                }),
-            );
-            continue;
+        emit_hub_pull_progress(
+            &app,
+            serde_json::json!({
+                "phase": "start",
+                "total": total,
+            }),
+        );
+
+        for (i, id) in ids.iter().enumerate() {
+            let index = i + 1;
+            let repo = {
+                let db = st.db.lock().map_err(|e| e.to_string())?;
+                db.get(*id).map_err(map_db_err)?
+            };
+            let Some(repo) = repo else {
+                failed += 1;
+                failures.push(HubPullFailure {
+                    id: *id,
+                    display_hint: format!("id {}", id),
+                    error: "repository not found".to_string(),
+                });
+                emit_hub_pull_progress(
+                    &app,
+                    serde_json::json!({
+                        "phase": "item",
+                        "index": index,
+                        "total": total,
+                        "id": id,
+                        "displayHint": format!("id {}", id),
+                        "status": "failed",
+                        "error": "repository not found",
+                    }),
+                );
+                continue;
+            };
+            let hint = repo_display_hint(&repo);
+            if !PathBuf::from(&repo.path).exists() {
+                skipped_missing += 1;
+                emit_hub_pull_progress(
+                    &app,
+                    serde_json::json!({
+                        "phase": "item",
+                        "index": index,
+                        "total": total,
+                        "id": repo.id,
+                        "displayHint": hint,
+                        "status": "skipped",
+                        "error": serde_json::Value::Null,
+                    }),
+                );
+                continue;
+            }
+            let result = hub_pull_from_origin_auto_inner(&git_bin, &st.db, &repo);
+            if result.ok {
+                succeeded += 1;
+                emit_hub_pull_progress(
+                    &app,
+                    serde_json::json!({
+                        "phase": "item",
+                        "index": index,
+                        "total": total,
+                        "id": repo.id,
+                        "displayHint": hint,
+                        "status": "ok",
+                        "error": serde_json::Value::Null,
+                    }),
+                );
+            } else {
+                failed += 1;
+                let err_msg = fetch_reset_failure_message(&result);
+                failures.push(HubPullFailure {
+                    id: repo.id,
+                    display_hint: hint.clone(),
+                    error: err_msg.clone(),
+                });
+                emit_hub_pull_progress(
+                    &app,
+                    serde_json::json!({
+                        "phase": "item",
+                        "index": index,
+                        "total": total,
+                        "id": repo.id,
+                        "displayHint": hint,
+                        "status": "failed",
+                        "error": err_msg,
+                    }),
+                );
+            }
         }
-        let result = hub_pull_from_origin_auto_inner(&state.git_bin, &state.db, &repo);
-        if result.ok {
-            succeeded += 1;
-            emit_hub_pull_progress(
-                &app,
-                serde_json::json!({
-                    "phase": "item",
-                    "index": index,
-                    "total": total,
-                    "id": repo.id,
-                    "displayHint": hint,
-                    "status": "ok",
-                    "error": serde_json::Value::Null,
-                }),
-            );
-        } else {
-            failed += 1;
-            let err_msg = fetch_reset_failure_message(&result);
-            failures.push(HubPullFailure {
-                id: repo.id,
-                display_hint: hint.clone(),
-                error: err_msg.clone(),
-            });
-            emit_hub_pull_progress(
-                &app,
-                serde_json::json!({
-                    "phase": "item",
-                    "index": index,
-                    "total": total,
-                    "id": repo.id,
-                    "displayHint": hint,
-                    "status": "failed",
-                    "error": err_msg,
-                }),
-            );
-        }
-    }
 
-    Ok(HubPullBatchSummary {
-        total,
-        succeeded,
-        failed,
-        skipped_missing,
-        failures,
+        Ok(HubPullBatchSummary {
+            total,
+            succeeded,
+            failed,
+            skipped_missing,
+            failures,
+        })
     })
+    .await
+    .map_err(|e| e.to_string())?
 }
 
 #[tauri::command]
-fn hub_pull_from_remote_auto_all(
+async fn hub_pull_from_remote_auto_all(
     app: tauri::AppHandle,
     state: tauri::State<'_, AppState>,
 ) -> Result<HubPullBatchSummary, String> {
@@ -1397,84 +1418,92 @@ fn hub_pull_from_remote_auto_all(
         let db = state.db.lock().map_err(|e| e.to_string())?;
         db.list_all().map_err(map_db_err)?
     };
-    let total = repos.len();
-    let mut succeeded = 0usize;
-    let mut failed = 0usize;
-    let mut skipped_missing = 0usize;
-    let mut failures: Vec<HubPullFailure> = Vec::new();
+    let git_bin = state.git_bin.clone();
+    drop(state);
 
-    emit_hub_pull_progress(
-        &app,
-        serde_json::json!({
-            "phase": "start",
-            "total": total,
-        }),
-    );
+    tauri::async_runtime::spawn_blocking(move || {
+        let total = repos.len();
+        let mut succeeded = 0usize;
+        let mut failed = 0usize;
+        let mut skipped_missing = 0usize;
+        let mut failures: Vec<HubPullFailure> = Vec::new();
+        let st = app.state::<AppState>();
 
-    for (i, repo) in repos.iter().enumerate() {
-        let index = i + 1;
-        let hint = repo_display_hint(repo);
-        if !PathBuf::from(&repo.path).exists() {
-            skipped_missing += 1;
-            emit_hub_pull_progress(
-                &app,
-                serde_json::json!({
-                    "phase": "item",
-                    "index": index,
-                    "total": total,
-                    "id": repo.id,
-                    "displayHint": hint,
-                    "status": "skipped",
-                    "error": serde_json::Value::Null,
-                }),
-            );
-            continue;
+        emit_hub_pull_progress(
+            &app,
+            serde_json::json!({
+                "phase": "start",
+                "total": total,
+            }),
+        );
+
+        for (i, repo) in repos.iter().enumerate() {
+            let index = i + 1;
+            let hint = repo_display_hint(repo);
+            if !PathBuf::from(&repo.path).exists() {
+                skipped_missing += 1;
+                emit_hub_pull_progress(
+                    &app,
+                    serde_json::json!({
+                        "phase": "item",
+                        "index": index,
+                        "total": total,
+                        "id": repo.id,
+                        "displayHint": hint,
+                        "status": "skipped",
+                        "error": serde_json::Value::Null,
+                    }),
+                );
+                continue;
+            }
+            let result = hub_pull_from_origin_auto_inner(&git_bin, &st.db, repo);
+            if result.ok {
+                succeeded += 1;
+                emit_hub_pull_progress(
+                    &app,
+                    serde_json::json!({
+                        "phase": "item",
+                        "index": index,
+                        "total": total,
+                        "id": repo.id,
+                        "displayHint": hint,
+                        "status": "ok",
+                        "error": serde_json::Value::Null,
+                    }),
+                );
+            } else {
+                failed += 1;
+                let err_msg = fetch_reset_failure_message(&result);
+                failures.push(HubPullFailure {
+                    id: repo.id,
+                    display_hint: hint.clone(),
+                    error: err_msg.clone(),
+                });
+                emit_hub_pull_progress(
+                    &app,
+                    serde_json::json!({
+                        "phase": "item",
+                        "index": index,
+                        "total": total,
+                        "id": repo.id,
+                        "displayHint": hint,
+                        "status": "failed",
+                        "error": err_msg,
+                    }),
+                );
+            }
         }
-        let result = hub_pull_from_origin_auto_inner(&state.git_bin, &state.db, repo);
-        if result.ok {
-            succeeded += 1;
-            emit_hub_pull_progress(
-                &app,
-                serde_json::json!({
-                    "phase": "item",
-                    "index": index,
-                    "total": total,
-                    "id": repo.id,
-                    "displayHint": hint,
-                    "status": "ok",
-                    "error": serde_json::Value::Null,
-                }),
-            );
-        } else {
-            failed += 1;
-            let err_msg = fetch_reset_failure_message(&result);
-            failures.push(HubPullFailure {
-                id: repo.id,
-                display_hint: hint.clone(),
-                error: err_msg.clone(),
-            });
-            emit_hub_pull_progress(
-                &app,
-                serde_json::json!({
-                    "phase": "item",
-                    "index": index,
-                    "total": total,
-                    "id": repo.id,
-                    "displayHint": hint,
-                    "status": "failed",
-                    "error": err_msg,
-                }),
-            );
-        }
-    }
 
-    Ok(HubPullBatchSummary {
-        total,
-        succeeded,
-        failed,
-        skipped_missing,
-        failures,
+        Ok(HubPullBatchSummary {
+            total,
+            succeeded,
+            failed,
+            skipped_missing,
+            failures,
+        })
     })
+    .await
+    .map_err(|e| e.to_string())?
 }
 
 #[tauri::command]
@@ -1609,7 +1638,10 @@ fn hub_touch_repo(state: tauri::State<'_, AppState>, id: i64) -> Result<(), Stri
 }
 
 #[tauri::command]
-fn hub_refresh_heads(state: tauri::State<'_, AppState>) -> Result<HubRefreshHeadsSummary, String> {
+async fn hub_refresh_heads(
+    app: tauri::AppHandle,
+    state: tauri::State<'_, AppState>,
+) -> Result<HubRefreshHeadsSummary, String> {
     let pairs: Vec<(i64, String)> = {
         let db = state.db.lock().map_err(|e| e.to_string())?;
         db.list_all()
@@ -1618,29 +1650,37 @@ fn hub_refresh_heads(state: tauri::State<'_, AppState>) -> Result<HubRefreshHead
             .map(|r| (r.id, r.path))
             .collect()
     };
-    let total = pairs.len();
-    let mut ok = 0usize;
-    let mut failed = 0usize;
-    for (id, path) in pairs {
-        let (head, got) = match PathBuf::from(&path).canonicalize() {
-            Ok(canon) => match resolve_repo(&state.git_bin, &canon) {
-                Ok(ctx) => match head_sha(&state.git_bin, &ctx) {
-                    Ok(h) => (Some(h), true),
+    let git_bin = state.git_bin.clone();
+    drop(state);
+
+    tauri::async_runtime::spawn_blocking(move || {
+        let total = pairs.len();
+        let mut ok = 0usize;
+        let mut failed = 0usize;
+        let st = app.state::<AppState>();
+        for (id, path) in pairs {
+            let (head, got) = match PathBuf::from(&path).canonicalize() {
+                Ok(canon) => match resolve_repo(&git_bin, &canon) {
+                    Ok(ctx) => match head_sha(&git_bin, &ctx) {
+                        Ok(h) => (Some(h), true),
+                        Err(_) => (None, false),
+                    },
                     Err(_) => (None, false),
                 },
                 Err(_) => (None, false),
-            },
-            Err(_) => (None, false),
-        };
-        if got {
-            ok += 1;
-        } else {
-            failed += 1;
+            };
+            if got {
+                ok += 1;
+            } else {
+                failed += 1;
+            }
+            let db = st.db.lock().map_err(|e| e.to_string())?;
+            db.update_cached_head(id, head.as_deref()).map_err(map_db_err)?;
         }
-        let db = state.db.lock().map_err(|e| e.to_string())?;
-        db.update_cached_head(id, head.as_deref()).map_err(map_db_err)?;
-    }
-    Ok(HubRefreshHeadsSummary { total, ok, failed })
+        Ok(HubRefreshHeadsSummary { total, ok, failed })
+    })
+    .await
+    .map_err(|e| e.to_string())?
 }
 
 fn load_ctx(git: &Path, path: &str) -> Result<git::RepoContext, String> {

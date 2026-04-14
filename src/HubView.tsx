@@ -174,6 +174,7 @@ export function HubView({
 
   useEffect(() => {
     let unlisten: (() => void) | undefined;
+    let cancelled = false;
     void onHubPullProgress((p) => {
       if (p.phase === "start") {
         setPullBatchSubline(null);
@@ -181,9 +182,11 @@ export function HubView({
       }
       setPullBatchSubline(formatHubPullProgressLine(isZhRef.current, p));
     }).then((fn) => {
-      unlisten = fn;
+      if (cancelled) fn();
+      else unlisten = fn;
     });
     return () => {
+      cancelled = true;
       unlisten?.();
     };
   }, []);
@@ -241,11 +244,6 @@ export function HubView({
         pullBatchRunning: "正在从远程更新仓库，请稍候…",
         batchPartialSummary: (ok: number, fail: number, skipped: number) =>
           `远程更新结束：成功 ${ok}，失败 ${fail}，路径缺失跳过 ${skipped}。失败详情见下方红色区域。`,
-        openHelpLinkShort: "查看帮助：从远程更新",
-        hubOnboardingRemoteHint:
-          "已克隆的仓库可在卡片上「拉取更新」，或通过 ⋯ 菜单「从远程更新全部 / 多选更新」批量同步（详见帮助）。",
-        clonePanelRemoteHint:
-          "已存在的同名远程可在 ⋯ 中批量更新；详见帮助「从远程更新」。",
       }
     : {
         moreActions: "More actions",
@@ -287,11 +285,6 @@ export function HubView({
         pullBatchRunning: "Updating repositories from remote…",
         batchPartialSummary: (ok: number, fail: number, skipped: number) =>
           `Remote update finished: ${ok} ok, ${fail} failed, ${skipped} missing path. See the red area below for errors.`,
-        openHelpLinkShort: "Help: update from remote",
-        hubOnboardingRemoteHint:
-          "For cloned repos use \"Pull\" on each card, or \"⋯\" → \"Update all from remote\" / multi-select batch (see Help).",
-        clonePanelRemoteHint:
-          "Batch updates for existing remotes are under \"⋯\"; see Help → \"Update from remote\".",
       };
 
   const displayedRepos = useMemo(() => {
@@ -1123,21 +1116,6 @@ export function HubView({
             {isZh ? "落地目录：" : "Destination root: "}
               <code>{getEffectiveRepoRoot().trim() || (isZh ? "未指定" : "Not set")}</code>
           </p>
-          <p className="settings-note hub-clone-extra">
-            {ui.clonePanelRemoteHint}{" "}
-            {onOpenRemoteHelp ? (
-              <button
-                type="button"
-                className="btn-quiet hub-inline-help-link"
-                onClick={() => {
-                  onOpenRemoteHelp();
-                  closeClonePanel();
-                }}
-              >
-                {ui.openHelpLinkShort}
-              </button>
-            ) : null}
-          </p>
           {cloneLog.length > 0 && (
             <pre ref={cloneLogRef} className="hub-clone-log">{cloneLog.join("\n")}</pre>
           )}
@@ -1397,18 +1375,6 @@ export function HubView({
               {isZh
                 ? "选择一种方式添加你的第一个 Git 仓库："
                 : "Choose a way to add your first Git repository:"}
-            </p>
-            <p className="hub-onboarding-extra-hint settings-note">
-              {ui.hubOnboardingRemoteHint}{" "}
-              {onOpenRemoteHelp ? (
-                <button
-                  type="button"
-                  className="btn-quiet hub-inline-help-link"
-                  onClick={onOpenRemoteHelp}
-                >
-                  {ui.openHelpLinkShort}
-                </button>
-              ) : null}
             </p>
             <div className="hub-onboarding-cards">
               <button
