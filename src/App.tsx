@@ -249,12 +249,6 @@ function App() {
     setShowRepoRootOnboarding(false);
   }
 
-  function openRemoteHelpSection() {
-    window.location.hash = "help-remote-update";
-    setActiveRepo(null);
-    setScreen("help");
-  }
-
   async function openRecentRepo(r: RepoRecord) {
     try {
       await hubTouchRepo(r.id);
@@ -464,7 +458,6 @@ function App() {
               repoRoot={repoRoot}
               refreshToken={hubRefreshToken}
               onClearGlobalNotice={() => setNotice(null)}
-              onOpenRemoteHelp={openRemoteHelpSection}
               onOpenRepo={(r) => {
                 setActiveRepo(r);
                 setScreen("repo");

@@ -39,7 +39,6 @@ type Props = {
   repoRoot: string;
   refreshToken?: number;
   onClearGlobalNotice?: () => void;
-  onOpenRemoteHelp?: () => void;
 };
 
 type SortMode = "favorite_first" | "recent_first" | "name_asc" | "created_desc";
@@ -92,7 +91,6 @@ export function HubView({
   repoRoot,
   refreshToken,
   onClearGlobalNotice,
-  onOpenRemoteHelp,
 }: Props) {
   const APP_REPO_ROOT_KEY = "deskvio-repo-root";
   function getEffectiveRepoRoot() {
